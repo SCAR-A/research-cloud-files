@@ -10,14 +10,18 @@ const storage = multer.diskStorage({
     cb(null, join(__dirname, '..', '..', process.env.UPLOAD_DIR || 'uploads'));
   },
   filename: (req, file, cb) => {
+    // Generate a unique hash for the file
     const fileHash = crypto.randomBytes(16).toString('hex');
     const ext = extname(file.originalname);
+    
+    // Store the original filename in the request object
+    req.originalFileName = file.originalname;
+    
     cb(null, `${fileHash}${ext}`);
   }
 });
 
 const fileFilter = (req, file, cb) => {
-  // 在这里可以添加文件类型限制
   cb(null, true);
 };
 

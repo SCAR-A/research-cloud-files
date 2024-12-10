@@ -34,41 +34,49 @@ export async function uploadFile(req, res) {
     await client.query('BEGIN');
 
     const {
-      originalname,
       filename,
       mimetype,
       size,
       path
     } = req.file;
 
-    const { project_type, python_version } = req.body;
+    const originalname = req.originalFileName;
+    const projectTypes = JSON.parse(req.body.project_types || '[]');
+    const pythonVersion = req.body.python_version || '';
     const hashValue = await calculateFileHash(path);
 
-    // 先插入文件记录
     const fileResult = await client.query(
-      `INSERT INTO files (original_name, file_path, mime_type, file_size, hash_value, project_type, python_version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, original_name, mime_type, file_size, project_type, python_version, created_at`,
-      [originalname, filename, mimetype, size, hashValue, project_type, python_version]
+      `INSERT INTO files (
+        original_name, file_path, mime_type, file_size, hash_value,
+        project_type, python_version
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, original_name, mime_type, file_size, created_at`,
+      [
+        originalname,
+        filename,
+        mimetype,
+        size,
+        hashValue,
+        JSON.stringify(projectTypes),
+        pythonVersion
+      ]
     );
 
-    const fileId = fileResult.rows[0].id;
-
-    // 记录访问日志
-    await logFileAccess(client, fileId, req.apiKeyId, 'UPLOAD', req);
-
-    // 提交事务
     await client.query('COMMIT');
 
     res.status(201).json({
       message: '文件上传成功',
-      file: fileResult.rows[0]
+      file: {
+        ...fileResult.rows[0],
+        project_types: projectTypes,
+        python_version: pythonVersion
+      }
     });
   } catch (error) {
     await client.query('ROLLBACK');
     log('error', '文件上传失败:', error);
     
-    // 如果文件已经保存到磁盘，尝试删除它
     if (req.file && req.file.path) {
       try {
         await fs.unlink(req.file.path);
@@ -82,6 +90,7 @@ export async function uploadFile(req, res) {
     client.release();
   }
 }
+
 
 export async function getFiles(req, res) {
   const { page = 1, limit = 10, search, sortBy = 'created_at', order = 'desc', project_type, python_version } = req.query;
@@ -191,8 +200,6 @@ export async function downloadFile(req, res) {
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
-
     const result = await client.query(
       'SELECT * FROM files WHERE id = $1 AND deleted_at IS NULL',
       [id]
@@ -203,28 +210,24 @@ export async function downloadFile(req, res) {
     }
 
     const file = result.rows[0];
-    const filePath = join(process.env.UPLOAD_DIR || 'uploads', file.file_path);
+    const filePath = join(__dirname, '..', '..', process.env.UPLOAD_DIR || 'uploads', file.file_path);
 
-    // 更新下载次数
     await client.query(
       'UPDATE files SET download_count = download_count + 1 WHERE id = $1',
       [id]
     );
 
-    // 记录下载日志
-    await logFileAccess(client, id, req.apiKeyId, 'DOWNLOAD', req);
+    res.setHeader('Content-Type', file.mime_type);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.original_name)}`);
     
-    await client.query('COMMIT');
-
-    res.download(filePath, file.original_name);
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
   } catch (error) {
-    await client.query('ROLLBACK');
     log('error', '文件下载失败:', error);
     res.status(500).json({ error: '文件下载失败' });
-  } finally {
-    client.release();
   }
 }
+
 
 export async function deleteFile(req, res) {
   const { id } = req.params;

@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { rateLimit } from 'express-rate-limit';
 import { initDatabase, checkDatabaseConnection } from './config/database.js';
 import filesRouter from './routes/files.js';
+import tagsRouter from './routes/tags.js';
 import { promises as fs } from 'fs';
 import { log } from './utils/logger.js';
 
@@ -53,6 +54,7 @@ async function startServer() {
 
     // API路由
     app.use('/api/v1/files', filesRouter);
+    app.use('/api/v1/tags', tagsRouter);
 
     // 健康检查端点
     app.get('/health', async (req, res) => {

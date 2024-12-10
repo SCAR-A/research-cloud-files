@@ -33,40 +33,37 @@ export interface FileListParams {
   python_version?: string;
 }
 
-export async function uploadFile(
-  file: File, 
-  metadata: { project_type?: string; python_version?: string }, 
-  onProgress?: (progress: number) => void
-) {
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (metadata.project_type) {
-      formData.append('project_type', metadata.project_type);
-    }
-    if (metadata.python_version) {
-      formData.append('python_version', metadata.python_version);
-    }
-
-    const response = await api.post('/files', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          onProgress(percentCompleted);
-        }
-      },
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('File upload error:', error);
-    throw error;
-  }
+export interface FileMetadata {
+  project_types: string[];
+  python_version: string;
 }
 
+export async function uploadFile(
+  file: File,
+  metadata: FileMetadata,
+  onProgress?: (progress: number) => void
+) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('project_types', JSON.stringify(metadata.project_types));
+  formData.append('python_version', metadata.python_version);
+
+  const response = await api.post('/files', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress && progressEvent.total) {
+        const percentCompleted = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total
+        );
+        onProgress(percentCompleted);
+      }
+    },
+  });
+
+  return response.data;
+}
 export async function getFiles(params: FileListParams = {}) {
   try {
     const response = await api.get<FileListResponse>('/files', { params });
