@@ -3,10 +3,13 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import pool from '../config/database.js';
 import { log } from '../utils/logger.js';
+import obsService from '../services/obsService.js';
 
 // 计算文件哈希值
-async function calculateFileHash(filePath) {
-  const fileBuffer = await fs.readFile(filePath);
+async function calculateFileHash(fileBuffer) {
+  if (!Buffer.isBuffer(fileBuffer)) {
+    throw new TypeError('The argument must be a Buffer');
+  }
   return createHash('sha256').update(fileBuffer).digest('hex');
 }
 
@@ -34,16 +37,22 @@ export async function uploadFile(req, res) {
     await client.query('BEGIN');
 
     const {
-      filename,
+      originalname,
       mimetype,
       size,
-      path
+      buffer
     } = req.file;
 
-    const originalname = req.originalFileName;
     const projectTypes = JSON.parse(req.body.project_types || '[]');
     const pythonVersion = req.body.python_version || '';
-    const hashValue = await calculateFileHash(path);
+    const hashValue = await calculateFileHash(buffer);
+
+    // Upload to Huawei OBS
+    const obsResult = await obsService.uploadFile(buffer, originalname);
+    
+    if (!obsResult.success) {
+      throw new Error('Failed to upload to OBS');
+    }
 
     const fileResult = await client.query(
       `INSERT INTO files (
@@ -54,7 +63,7 @@ export async function uploadFile(req, res) {
       RETURNING id, original_name, mime_type, file_size, created_at`,
       [
         originalname,
-        filename,
+        obsResult.key,
         mimetype,
         size,
         hashValue,
@@ -70,90 +79,70 @@ export async function uploadFile(req, res) {
       file: {
         ...fileResult.rows[0],
         project_types: projectTypes,
-        python_version: pythonVersion
+        python_version: pythonVersion,
+        url: obsResult.url
       }
     });
   } catch (error) {
     await client.query('ROLLBACK');
     log('error', '文件上传失败:', error);
-    
-    if (req.file && req.file.path) {
-      try {
-        await fs.unlink(req.file.path);
-      } catch (unlinkError) {
-        log('error', '清理上传文件失败:', unlinkError);
-      }
-    }
-    
     res.status(500).json({ error: '文件上传失败' });
   } finally {
     client.release();
   }
 }
 
-
 export async function getFiles(req, res) {
-  const { page = 1, limit = 10, search, sortBy = 'created_at', order = 'desc', project_type, python_version } = req.query;
+  const { page = 1, limit = 10, search = '', sortBy = 'created_at', order = 'desc' } = req.query;
   const offset = (page - 1) * limit;
 
   const client = await pool.connect();
   try {
     let query = `
-      SELECT id, original_name, mime_type, file_size, download_count, project_type, python_version, created_at
-      FROM files
+      SELECT id, original_name, mime_type, file_size, download_count, 
+             project_type, python_version, created_at, file_path
+      FROM files 
       WHERE deleted_at IS NULL
     `;
-    const params = [];
-    let paramCount = 0;
+    const queryParams = [];
 
     if (search) {
-      paramCount++;
-      query += ` AND original_name ILIKE $${paramCount}`;
-      params.push(`%${search}%`);
+      query += ` AND original_name ILIKE $1`;
+      queryParams.push(`%${search}%`);
     }
 
-    if (project_type) {
-      paramCount++;
-      query += ` AND project_type = $${paramCount}`;
-      params.push(project_type);
-    }
+    query += ` ORDER BY ${sortBy} ${order.toUpperCase()}`;
+    query += ` LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
+    queryParams.push(limit, offset);
 
-    if (python_version) {
-      paramCount++;
-      query += ` AND python_version = $${paramCount}`;
-      params.push(python_version);
-    }
+    const result = await client.query(query, queryParams);
 
-    query += ` ORDER BY ${sortBy} ${order} LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
-    params.push(limit, offset);
-
-    const result = await client.query(query, params);
-    
-    let countQuery = 'SELECT COUNT(*) FROM files WHERE deleted_at IS NULL';
-    const countParams = [];
-    
-    if (search) {
-      countQuery += ` AND original_name ILIKE $1`;
-      countParams.push(`%${search}%`);
-    }
-    
-    if (project_type) {
-      countQuery += ` AND project_type = $${countParams.length + 1}`;
-      countParams.push(project_type);
-    }
-
-    if (python_version) {
-      countQuery += ` AND python_version = $${countParams.length + 1}`;
-      countParams.push(python_version);
-    }
-
-    const countResult = await client.query(countQuery, countParams);
+    const countQuery = `
+      SELECT COUNT(*) 
+      FROM files 
+      WHERE deleted_at IS NULL
+      ${search ? ` AND original_name ILIKE $1` : ''}
+    `;
+    const countResult = await client.query(
+      countQuery,
+      search ? [`%${search}%`] : []
+    );
 
     const total = parseInt(countResult.rows[0].count);
     const totalPages = Math.ceil(total / limit);
 
+    // Generate presigned URLs for each file
+    const files = await Promise.all(result.rows.map(async (file) => {
+      const presignedUrl = await obsService.generatePresignedUrl(file.file_path);
+      return {
+        ...file,
+        project_types: JSON.parse(file.project_type || '[]'),
+        url: presignedUrl
+      };
+    }));
+
     res.json({
-      files: result.rows,
+      files,
       pagination: {
         total,
         totalPages,
@@ -175,9 +164,7 @@ export async function getFileById(req, res) {
 
   try {
     const result = await client.query(
-      `SELECT id, original_name, mime_type, file_size, hash_value, project_type, python_version, download_count, created_at
-       FROM files
-       WHERE id = $1 AND deleted_at IS NULL`,
+      'SELECT * FROM files WHERE id = $1 AND deleted_at IS NULL',
       [id]
     );
 
@@ -185,8 +172,14 @@ export async function getFileById(req, res) {
       return res.status(404).json({ error: '文件不存在' });
     }
 
-    await logFileAccess(client, id, req.apiKeyId, 'VIEW', req);
-    res.json(result.rows[0]);
+    const file = result.rows[0];
+    const presignedUrl = await obsService.generatePresignedUrl(file.file_path);
+
+    res.json({
+      ...file,
+      project_types: JSON.parse(file.project_type || '[]'),
+      url: presignedUrl
+    });
   } catch (error) {
     log('error', '获取文件详情失败:', error);
     res.status(500).json({ error: '获取文件详情失败' });
@@ -210,21 +203,26 @@ export async function downloadFile(req, res) {
     }
 
     const file = result.rows[0];
-    const filePath = join(__dirname, '..', '..', process.env.UPLOAD_DIR || 'uploads', file.file_path);
 
+    // 生成预签名URL，默认10分钟有效期
+    const presignedUrl = await obsService.generatePresignedUrl(file.file_path);
+
+    // 更新下载计数
     await client.query(
       'UPDATE files SET download_count = download_count + 1 WHERE id = $1',
       [id]
     );
 
-    res.setHeader('Content-Type', file.mime_type);
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.original_name)}`);
-    
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
+    // 返回预签名URL
+    res.json({
+      url: presignedUrl,
+      filename: file.original_name
+    });
   } catch (error) {
     log('error', '文件下载失败:', error);
     res.status(500).json({ error: '文件下载失败' });
+  } finally {
+    client.release();
   }
 }
 
@@ -237,24 +235,25 @@ export async function deleteFile(req, res) {
     await client.query('BEGIN');
 
     const result = await client.query(
-      'UPDATE files SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING *',
+      'UPDATE files SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING file_path',
       [id]
     );
 
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: '文件不存在' });
     }
 
-    // 记录删除日志
-    await logFileAccess(client, id, req.apiKeyId, 'DELETE', req);
-    
-    await client.query('COMMIT');
+    // Delete from OBS
+    const filePath = result.rows[0].file_path;
+    await obsService.deleteFile(filePath);
 
+    await client.query('COMMIT');
     res.json({ message: '文件删除成功' });
   } catch (error) {
     await client.query('ROLLBACK');
-    log('error', '文件删除失败:', error);
-    res.status(500).json({ error: '文件删除失败' });
+    log('error', '删除文件失败:', error);
+    res.status(500).json({ error: '删除文件失败' });
   } finally {
     client.release();
   }

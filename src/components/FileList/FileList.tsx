@@ -58,17 +58,17 @@ export function FileList() {
     }
   };
 
-  const handleDownload = async (id: string, fileName: string) => {
+  const handleDownload = async (id: string) => {
     try {
-      const blob = await downloadFile(id);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      const { url, filename } = await downloadFile(id);
+      
+      // 创建一个临时链接并触发下载
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename; // 使用服务器返回的原始文件名
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (err) {
       setError('下载文件失败');
     }
@@ -179,7 +179,7 @@ export function FileList() {
                       <motion.button
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
-                        onClick={() => handleDownload(file.id, file.original_name)}
+                        onClick={() => handleDownload(file.id)}
                         className="text-blue-600 hover:text-blue-900 mr-4"
                       >
                         <Download className="h-5 w-5" />

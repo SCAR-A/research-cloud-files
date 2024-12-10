@@ -9,6 +9,7 @@ export interface FileItem {
   project_type: string;
   python_version: string;
   created_at: string;
+  url: string;
 }
 
 export interface PaginationInfo {
@@ -64,6 +65,7 @@ export async function uploadFile(
 
   return response.data;
 }
+
 export async function getFiles(params: FileListParams = {}) {
   try {
     const response = await api.get<FileListResponse>('/files', { params });
@@ -94,11 +96,9 @@ export async function deleteFile(id: string) {
   }
 }
 
-export async function downloadFile(id: string) {
+export async function downloadFile(id: string): Promise<{ url: string; filename: string }> {
   try {
-    const response = await api.get(`/files/${id}/download`, {
-      responseType: 'blob'
-    });
+    const response = await api.get(`/files/${id}/download`);
     return response.data;
   } catch (error) {
     console.error('Download file error:', error);
