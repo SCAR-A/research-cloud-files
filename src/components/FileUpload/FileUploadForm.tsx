@@ -4,7 +4,7 @@ import { Upload, Settings } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { TagInput } from '../Tags/TagInput';
 import { TagManager } from '../Tags/TagManager';
-import { getTags, updateTags } from '../../services/tagService';
+import { getTags, updateTags } from '../../services/TagService';
 import { formatFileSize } from '../../utils/fileUtils';
 import { uploadFile } from '../../services/fileService';
 
@@ -82,7 +82,7 @@ export function FileUploadForm({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" style={{ height: '500px' }}>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-12 gap-4">
           {/* 文件上传区域 */}
@@ -145,7 +145,7 @@ export function FileUploadForm({
                   suggestions={tags.projectTypes}
                   onAddTag={(tag) => setProjectTypes([...projectTypes, tag])}
                   onRemoveTag={(tag) => setProjectTypes(projectTypes.filter(t => t !== tag))}
-                  placeholder="选择或输入项目类型..."
+                  placeholder="选择项目类型..."
                   className="w-full"
                 />
               </div>

@@ -115,29 +115,40 @@ export async function updateTags(req, res) {
   try {
     await client.query('BEGIN');
 
-    // 软删除所有现有标签
-    await client.query(
-      `UPDATE tags 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE deleted_at IS NULL`
-    );
-
     // 插入新的项目类型标签
     for (const tagname of projectTypes) {
-      await client.query(
-        `INSERT INTO tags (tagname, tagtype)
-         VALUES ($1, 'projectType')`,
-        [tagname]
-      );
+        const existingTag = await client.query(
+            'SELECT id FROM tags WHERE tagname = $1 AND tagtype = $2 AND deleted_at IS NULL',
+            [tagname, 'projectType']
+          );
+        if (existingTag.rows.length > 0) {
+            continue;
+        }else{
+            console.log('插入新的项目类型标签:', tagname);
+            await client.query(
+                `INSERT INTO tags (tagname, tagtype)
+            VALUES ($1, 'projectType')`,
+                [tagname]
+            );
+        }
     }
 
     // 插入新的Python版本标签
     for (const tagname of pythonVersions) {
-      await client.query(
-        `INSERT INTO tags (tagname, tagtype)
-         VALUES ($1, 'pythonVersion')`,
-        [tagname]
-      );
+        const existingTag = await client.query(
+            'SELECT id FROM tags WHERE tagname = $1 AND tagtype = $2 AND deleted_at IS NULL',
+            [tagname, 'pythonVersion']
+          );
+        if (existingTag.rows.length > 0) {
+            continue;
+        }else{
+            console.log('插入新的Python版本标签:', tagname);
+            await client.query(
+                `INSERT INTO tags (tagname, tagtype)
+                VALUES ($1, 'pythonVersion')`,
+                [tagname]
+            );
+        }
     }
 
     await client.query('COMMIT');

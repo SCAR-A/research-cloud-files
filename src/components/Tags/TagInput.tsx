@@ -61,12 +61,12 @@ export function TagInput({
     }
 
     updateDropdownPosition();
-    window.addEventListener('scroll', updateDropdownPosition, true);
+    //window.addEventListener('scroll', updateDropdownPosition, true);
     window.addEventListener('resize', updateDropdownPosition);
     document.addEventListener('mousedown', handleClickOutside);
 
     return () => {
-      window.removeEventListener('scroll', updateDropdownPosition, true);
+      //window.removeEventListener('scroll', updateDropdownPosition, true);
       window.removeEventListener('resize', updateDropdownPosition);
       document.removeEventListener('mousedown', handleClickOutside);
     };
@@ -111,16 +111,18 @@ export function TagInput({
           top: `${dropdownPosition.top}px`,
           left: `${dropdownPosition.left}px`,
           width: `${dropdownPosition.width}px`,
-          zIndex: 9999
+          zIndex: 9999,
+          maxHeight: '200px',
+          overflowY: 'auto'
         }}
-        className="bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto"
+        className="bg-white border rounded-lg shadow-lg scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100"
       >
         {filteredSuggestions.map((suggestion, index) => (
           <motion.button
             key={index}
             whileHover={{ backgroundColor: 'rgb(243, 244, 246)' }}
             onClick={() => handleSuggestionClick(suggestion)}
-            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:bg-gray-50 transition-colors"
+            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:bg-gray-50 transition-colors cursor-pointer"
           >
             {suggestion}
           </motion.button>
@@ -140,7 +142,7 @@ export function TagInput({
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
-              className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-sm"
+              className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-sm select-none"
             >
               {tag}
               <button

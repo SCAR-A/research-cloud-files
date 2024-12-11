@@ -43,7 +43,9 @@ export async function uploadFile(req, res) {
       buffer
     } = req.file;
 
-    const projectTypes = JSON.parse(req.body.project_types || '[]');
+    const projectTypes = JSON.parse(req.body.project_types || '[]').sort();
+    const projectTypesString = projectTypes.join('-');
+    
     const pythonVersion = req.body.python_version || '';
     const hashValue = await calculateFileHash(buffer);
 
@@ -67,7 +69,7 @@ export async function uploadFile(req, res) {
         mimetype,
         size,
         hashValue,
-        JSON.stringify(projectTypes),
+        projectTypesString,
         pythonVersion
       ]
     );
@@ -107,7 +109,7 @@ export async function getFiles(req, res) {
     const queryParams = [];
 
     if (search) {
-      query += ` AND original_name ILIKE $1`;
+      query += ` AND original_name ILIKE $1 OR project_type ILIKE $1`;
       queryParams.push(`%${search}%`);
     }
 
@@ -136,7 +138,7 @@ export async function getFiles(req, res) {
       const presignedUrl = await obsService.generatePresignedUrl(file.file_path);
       return {
         ...file,
-        project_types: JSON.parse(file.project_type || '[]'),
+        project_types: file.project_type,
         url: presignedUrl
       };
     }));
@@ -177,7 +179,7 @@ export async function getFileById(req, res) {
 
     res.json({
       ...file,
-      project_types: JSON.parse(file.project_type || '[]'),
+      project_types: file.project_type,
       url: presignedUrl
     });
   } catch (error) {
@@ -270,6 +272,9 @@ export async function downloadFileByTypeAndName(req, res) {
   const client = await pool.connect();
 
   try {
+    // 转换 project_type 为排序一致的字符串
+    const sortedProjectType = project_type.split('-').sort().join('-');
+    console.log('sortedProjectType:', sortedProjectType);
     // 先查询文件ID
     const result = await client.query(
       `SELECT id 
@@ -278,7 +283,7 @@ export async function downloadFileByTypeAndName(req, res) {
        AND deleted_at IS NULL
        ORDER BY created_at DESC
        LIMIT 1`,
-      [project_type]
+      [sortedProjectType]
     );
 
     if (result.rows.length === 0) {
